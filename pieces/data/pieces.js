@@ -35,140 +35,130 @@ Ext.namespace('Deluge.pieces');
 var dh = Ext.DomHelper;
 
 Deluge.pieces.PiecesTab = Ext.extend(Ext.Panel, {
-		title: _('Pieces'),
+        title: _('Pieces'),
+        autoScroll: true,
 
-		constructor: function() {
-			Deluge.pieces.PiecesTab.superclass.constructor.call(this);
-			this.updateConfig();
-			this.tdtpl = new Ext.Template('<td id="ptd{0}" title="Piece {0}" style="background-color:{1};" width="8" height="10"></td>');
-			this.tdtpl.compile();
-			this.trtpl = new Ext.Template('<tr id="{id}"></tr>');
-			this.trtpl.compile();
-			this.curTorrent = null;
-			this.lastDone = false;
-			this.tableBox = this.add({
-					xtype: 'box',
-					autoEl: {
-						tag: 'table',
-						id: 'pieces_table',
-						style: 'table-layout: fixed',
-						cellspacing: 2
-					}
-				});
-			this.needRebuild = true;
-		},
-		
-		updateConfig: function() {
-			deluge.client.pieces.get_config({
-					success: function(config) {
-						var ctmp = config['dling_color'].split("");
-						this.dlingColor = "#"+ctmp[1]+ctmp[2]+ctmp[3]+ctmp[4]+ctmp[5]+ctmp[6];
-						ctmp = config['dled_color'].split("");
-						this.dledColor = "#"+ctmp[1]+ctmp[2]+ctmp[3]+ctmp[4]+ctmp[5]+ctmp[6];
-						ctmp = config['not_dled_color'].split("");
-						this.notDledColor = "#"+ctmp[1]+ctmp[2]+ctmp[3]+ctmp[4]+ctmp[5]+ctmp[6];
-					},
-					scope: this
-				});
-		},
+        constructor: function() {
+            Deluge.pieces.PiecesTab.superclass.constructor.call(this);
+            this.pieceSize = 10;
+            this.pieceMargin = 3;
+            this.updateConfig();
+            this.curTorrent = null;
+            this.lastDone = false;
+            this.canvasBox = this.add({
+                    xtype: 'box',
+                    autoEl: {
+                        tag: 'canvas',
+                        id: 'pieces_canvas',
+                    }
+                });
+            this.needRebuild = true;
+        },
+        
+        updateConfig: function() {
+            deluge.client.pieces.get_config({
+                    success: function(config) {
+                        var ctmp = config['dling_color'].split("");
+                        this.dlingColor = "#"+ctmp[1]+ctmp[2]+ctmp[3]+ctmp[4]+ctmp[5]+ctmp[6];
+                        ctmp = config['dled_color'].split("");
+                        this.dledColor = "#"+ctmp[1]+ctmp[2]+ctmp[3]+ctmp[4]+ctmp[5]+ctmp[6];
+                        ctmp = config['not_dled_color'].split("");
+                        this.notDledColor = "#"+ctmp[1]+ctmp[2]+ctmp[3]+ctmp[4]+ctmp[5]+ctmp[6];
+                        this.pieceSize = parseInt(config['square_size'], 10);
+                        this.pieceMargin = parseInt(config['square_border_size'], 10);
+                    },
+                    scope: this
+                });
+        },
+ 
 
+        buildCanvas: function(numPieces, done, pieces, curdl) {
+            var canvas = this.getCanvas();
+            var ctx = canvas.getContext('2d');
 
-		buildTable: function(numPieces, done, pieces, curdl) {
-			var w = this.getWidth();
-			var nc = Math.ceil(w/12);
-			var nr = Math.ceil(numPieces/nc);
-			var pid = 0;
-			var cdi = 0;
-			if (done || cdi >= curdl.length)
-				cdi = -1;
-			this.clear();
-			for (i = 0;i < nr;i++) {
-				var rid = "pr"+i;
-				this.trtpl.append('pieces_table',{id:rid});
-				for (j = 0;j < nc;j++) {
-					if (cdi != -1 && curdl[cdi] == pid) {
-						cdi++;
-						if (cdi >= curdl.length)
-							cdi = -1;
-						this.tdtpl.append(rid,[pid,this.dlingColor]);
-					}
-					else if (done)
-						this.tdtpl.append(rid,[pid,this.dledColor]);
-					else
-						this.tdtpl.append(rid,[pid,pieces[pid]?this.dledColor:this.notDledColor]);
+            var width = this.getInnerWidth() - Ext.getScrollBarWidth();
+            
+            canvas.width = width;
+            var pieces_per_row = Math.floor(width / (this.pieceMargin + this.pieceSize));
+            var rows = Math.floor(numPieces / pieces_per_row);
+            canvas.height = this.pieceMargin + (rows + 1) * (this.pieceSize + this.pieceMargin);
 
-					pid++;
-					if (pid >= numPieces)
-						break;
-				}
-				if (pid >= numPieces)
-					break;
-			}
-		},
+            // Draw full rows
+            for (var row=0; row<rows; ++row) {
+                this.drawRow(ctx, row, pieces_per_row, pieces_per_row, pieces, curdl);
+            }
+            
+            // Last row with leftovers
+            this.drawRow(ctx, rows, numPieces % pieces_per_row, pieces_per_row, pieces, curdl);
+        },
 
-		updateTable: function(numPieces, done, pieces, curdl) {
-			var cdi = 0;
-			if (done || cdi >= curdl.length)
-				cdi = -1;
-			for (pid = 0;pid < numPieces;pid++) {
-				var td = Ext.DomQuery.selectNode("td[id=ptd"+pid+"]");
-				if (cdi != -1 && curdl[cdi] == pid) {
-					cdi++;
-					if (cdi >= curdl.length)
-						cdi = -1;
-					td.style.backgroundColor = this.dlingColor;
-				}
-				else if (pieces[pid])
-					td.style.backgroundColor = this.dledColor;
-				else
-					td.style.backgroundColor = this.notDledColor;
-			}
-		},
+        drawRow: function(ctx, row, pieces, pieces_per_row, piecesStatus, currentlyDownloading) {
+            var y = this.pieceMargin + row * (this.pieceSize + this.pieceMargin);
+            for (piece=0; piece<pieces; ++piece) {
+                var x = this.pieceMargin + piece * (this.pieceSize + this.pieceMargin);
+                var pieceNum = this.getPieceNum(row, piece, pieces_per_row);
+                var color = piecesStatus[pieceNum] ? this.dledColor : 
+                            currentlyDownloading.indexOf(pieceNum) >= 0 ? this.dlingColor :
+                            this.notDledColor;
+                this.drawPiece(ctx, x, y, color);
+            }
+        },
 
-		onTorrentInfo: function(info) {
-			if (this.needRebuild) {
-				this.buildTable(info[1],info[0],info[2],info[3]);
-				this.needRebuild = false;
-				this.lastDone = info[0];
-			} else {
-				if (!this.lastDone)
-					this.updateTable(info[1],info[0],info[2],info[3]);
-				this.lastDone = info[0];
-			}
-		},
+        getPieceNum: function(currentRow, currentPiece, piecesPerRow) {
+            return currentRow*piecesPerRow + currentPiece;
+        },
 
-		clear: function() {
-			if (!this.tblnode)
-				this.tblnode = Ext.DomQuery.selectNode("table[id=pieces_table]");
-			if (this.tblnode)
-				this.tblnode.innerHTML = "";
-			this.needRebuild = true;
-		},
+        drawPiece: function(ctx, x, y, color) {
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, this.pieceSize, this.pieceSize);
+        },
 
-		update: function(torrentId) {
-			if (torrentId != this.curTorrent) {
-				this.needRebuild = true;
-				this.curTorrent = torrentId;
-			}
-			deluge.client.pieces.get_torrent_info(torrentId, {
-					success: this.onTorrentInfo,
-					scope: this,
-					torrentId: torrentId
-				});
-		}
-		
+        getCanvas: function() {
+            return document.getElementById('pieces_canvas');
+        },
+
+        onTorrentInfo: function(info) {
+            if (this.needRebuild) {
+                this.buildCanvas(info[1],info[0],info[2],info[3]); 
+                this.needRebuild = false;
+                this.lastDone = info[0];
+            } else {
+                if (!this.lastDone)
+                    this.buildCanvas(info[1],info[0],info[2],info[3]); 
+                this.lastDone = info[0];
+            }
+        },
+
+        clear: function() {
+            this.needRebuild = true;
+        },
+
+        update: function(torrentId) {
+            if (torrentId != this.curTorrent) {
+                this.needRebuild = true;
+                this.curTorrent = torrentId;
+            }
+            deluge.client.pieces.get_torrent_info(torrentId, {
+                    success: this.onTorrentInfo,
+                    scope: this,
+                    torrentId: torrentId
+                });
+        }
+        
 });
 
 Deluge.pieces.PiecesPlugin = Ext.extend(Deluge.Plugin, {
-		name:"Pieces",
+        name:"Pieces",
 
-		onDisable: function() {
+        onEnable: function() {
+            this.piecesTab = new Deluge.pieces.PiecesTab();
+            deluge.details.add(this.piecesTab);
+        },
 
-		},
-
-		onEnable: function() {
-			deluge.details.add(new Deluge.pieces.PiecesTab());
-		}
+        onDisable: function() {
+            deluge.details.remove(this.piecesTab);
+            this.piecesTab.destroy();
+        }
 
 });
 Deluge.registerPlugin('Pieces',Deluge.pieces.PiecesPlugin);
