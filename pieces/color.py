@@ -37,18 +37,16 @@
 #    statement from all source files in the program, then also delete it here.
 #
 
-import gi
-
-gi.require_version("Gtk", "3.0")
-from gi.repository import Gdk
-
 class Color:
     def __init__(self, value):
-        self.parsed_color = Gdk.color_parse(value)
+        self.parsed_color = None
         self.value = value
 
     def get_value(self):
         return self.value
 
     def get_color(self):
+        from gi.repository import Gdk
+        if self.parsed_color is None:
+            self.parsed_color = Gdk.parse_color(self.get_value())
         return self.parsed_color

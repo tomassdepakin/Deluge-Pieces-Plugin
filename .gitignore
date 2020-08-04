@@ -1,3 +1,5 @@
 /build/
 /Pieces.egg-info/
 /dist/
+/temp/
+*.pyc
